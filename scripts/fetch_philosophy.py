@@ -8,7 +8,7 @@ Resumable stages, each writing into the output directory:
   3. labels.jsonl      Claude Haiku's category for each candidate (appended to; resumable)
   4. articles.jsonl    cleaned, sectioned articles whose category is kept (rebuilt every run)
 
-Stage 3 needs Anthropic credentials (e.g. ANTHROPIC_API_KEY); without them the script stops after stage 2.
+Stage 3 needs Anthropic credentials (ANTHROPIC_API_KEY, in the environment or .env); without them the script stops after stage 2.
 
 Usage:
   uv run scripts/fetch_philosophy.py
@@ -22,6 +22,7 @@ import os
 from collections import Counter
 from pathlib import Path
 
+from dotenv import load_dotenv
 from tqdm import tqdm
 
 from applied_llm.selection import KEPT_CATEGORIES, ArticleClassifier, prefilter
@@ -154,8 +155,10 @@ def main() -> None:
     parser.add_argument("--contact", help="email or URL for the User-Agent (default: the project's GitHub URL)")
     args = parser.parse_args()
 
+    load_dotenv()  # picks up ANTHROPIC_API_KEY from .env
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    logging.getLogger("httpx").setLevel(logging.WARNING)  # don't log every request
+    for name in ("httpx", "httpx2"):  # don't log every HTTP request
+        logging.getLogger(name).setLevel(logging.WARNING)
     args.out_dir.mkdir(parents=True, exist_ok=True)
     client_kwargs = {"user_agent": f"applied-llm-corpus-builder/0.1 ({args.contact})"} if args.contact else {}
 
