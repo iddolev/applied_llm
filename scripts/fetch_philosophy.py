@@ -6,7 +6,9 @@ Resumable stages, each writing into the output directory:
                        Wikidata types; people, works, lists and organizations are marked excluded
   2. raw.jsonl         raw wikitext of the non-excluded candidates (appended to; resumable)
   3. labels.jsonl      Claude Haiku's category for each candidate (appended to; resumable)
-  4. articles.jsonl    cleaned, sectioned articles whose category is kept (rebuilt every run)
+  4. articles/         original wikitext of each article whose category is kept, one
+                       <Title>.mediawiki file per article (rebuilt every run)
+     index.jsonl       metadata of those articles (title, url, revision, category, file name)
 
 Stage 3 needs Anthropic credentials (ANTHROPIC_API_KEY, in the environment or .env); without them the script stops after stage 2.
 
@@ -19,6 +21,7 @@ import argparse
 import json
 import logging
 import os
+import re
 from collections import Counter
 from pathlib import Path
 
@@ -119,6 +122,7 @@ def load_articles(raw_path: Path, min_chars: int) -> dict[str, dict]:
             "timestamp": rec["timestamp"],
             "n_chars": n_chars,
             "sections": [s.to_dict() for s in sections],
+            "wikitext": rec["wikitext"],
         }
     return articles
 
@@ -139,6 +143,31 @@ def classify(articles: dict[str, dict], types: dict[str, list[str]], path: Path)
             if value:
                 labels[title] = value
     return labels
+
+
+def article_filename(title: str) -> str:
+    """Wikipedia URL-style file name, percent-encoding the characters file systems reject."""
+    name = re.sub(r'[%/\\:*?"<>|]', lambda m: f"%{ord(m.group()):02X}", title.replace(" ", "_"))
+    return f"{name}.mediawiki"
+
+
+def write_corpus(articles: list[dict], out_dir: Path) -> None:
+    """Write each article's wikitext to articles/<Title>.mediawiki and its metadata to index.jsonl."""
+    articles_dir = out_dir / "articles"
+    articles_dir.mkdir(exist_ok=True)
+    written = set()
+    with (out_dir / "index.jsonl").open("w", encoding="utf-8") as index:
+        for article in articles:
+            filename = article_filename(article["title"])
+            (articles_dir / filename).write_text(article["wikitext"], encoding="utf-8")
+            written.add(filename)
+            meta = {k: v for k, v in article.items() if k not in ("sections", "wikitext")}
+            index.write(json.dumps({**meta, "file": f"articles/{filename}"}, ensure_ascii=False) + "\n")
+    # Remove files of articles that are no longer kept.
+    for path in articles_dir.glob("*.mediawiki"):
+        if path.name not in written:
+            path.unlink()
+    log.info("Wrote %d articles to %s/ and their metadata to %s", len(written), articles_dir, out_dir / "index.jsonl")
 
 
 def has_anthropic_credentials() -> bool:
@@ -180,14 +209,9 @@ def main() -> None:
     log.info("Categories: %s", dict(Counter(labels.get(t, "unclassified") for t in articles)))
 
     kept = {c.value for c in KEPT_CATEGORIES}
-    out_path = args.out_dir / "articles.jsonl"
-    n = 0
-    with out_path.open("w", encoding="utf-8") as out:
-        for title, article in articles.items():
-            if labels.get(title) in kept:
-                out.write(json.dumps({**article, "category": labels[title]}, ensure_ascii=False) + "\n")
-                n += 1
-    log.info("Wrote %d articles to %s", n, out_path)
+    write_corpus(
+        [{**a, "category": labels[t]} for t, a in articles.items() if labels.get(t) in kept], args.out_dir
+    )
 
 
 if __name__ == "__main__":
