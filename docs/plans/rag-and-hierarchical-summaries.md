@@ -180,6 +180,12 @@ Rules:
 - its failures have been examined by hand to see where they come from: retrieval, answering or the question itself;
 - a short write-up says which Phase 5 improvements to try.
 
+**Result (done):**
+- 150 questions (from 207 candidates; $7.89).
+- Baseline: 81% correct, 15% partial, 97% of cited claims supported, about $0.03 and 4 seconds per question.
+- Weakest: multi-hop questions (56% correct), because the second hop isn't retrieved. Next weakest: scenario questions (73%).
+- Full results, the judge check and the Phase 5 recommendations are in [../../sandbox/baseline-evaluation.md](../../sandbox/baseline-evaluation.md). Flagged questions are in `sandbox/eval-questions-flagged.md`.
+
 ## Phase 5: Retrieval improvements (only where Phase 4 shows a need)
 
 Try each change as a variant and measure it with `run_eval.py`:

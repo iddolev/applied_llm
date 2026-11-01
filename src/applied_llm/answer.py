@@ -88,9 +88,10 @@ class Answerer:
         self.effort = effort
         self._client = anthropic.Anthropic(max_retries=5)
 
-    def ask(self, question: str, k: int = 30) -> Answer:
+    def ask(self, question: str, k: int = 30, retrieved: list[SearchResult] | None = None) -> Answer:
+        """Answer from the top-k chunks; pass `retrieved` to reuse an earlier search (only its top k are sent)."""
         start = time.monotonic()
-        retrieved = self.index.search(question, k)
+        retrieved = retrieved[:k] if retrieved is not None else self.index.search(question, k)
         user_message = f"<passages>\n{format_passages(retrieved)}\n</passages>\n\n<question>{question}</question>"
         with self._client.messages.stream(
             model=self.model,
