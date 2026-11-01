@@ -1,8 +1,9 @@
 """Split the corpus articles into retrieval-sized chunks.
 
 Reads index.jsonl and the articles/<Title>.mediawiki files written by fetch_philosophy.py,
-cleans each article into sections, and writes one chunk per line to chunks.jsonl. Reports
-chunk length statistics, in words and in tokens of the embedding model's tokenizer.
+cleans each article into sections, and writes one chunk per line to chunks.jsonl, plus a
+human-readable chunks_pretty.txt. Reports chunk length statistics, in words and in tokens of
+the embedding model's tokenizer.
 
 Usage:
   uv run scripts/build_chunks.py
@@ -13,12 +14,13 @@ import argparse
 import json
 import logging
 import statistics
+import textwrap
 from pathlib import Path
 
 from tokenizers import Tokenizer
 from tqdm import tqdm
 
-from applied_llm.chunking import chunk_article, count_words
+from applied_llm.chunking import HEADING_SEPARATOR, Chunk, chunk_article, count_words
 from applied_llm.wikitext import wikitext_to_sections
 
 log = logging.getLogger("build_chunks")
@@ -31,6 +33,21 @@ def describe(name: str, values: list[int]) -> str:
     pct = lambda p: values[min(len(values) - 1, int(len(values) * p))]  # noqa: E731
     return (f"{name}: median {statistics.median(values):.0f}, p10 {pct(0.1)}, p90 {pct(0.9)}, "
             f"p99 {pct(0.99)}, max {values[-1]}")
+
+
+def write_pretty(chunks: list[Chunk], path: Path) -> None:
+    """Write the chunks as wrapped text with a header per chunk, grouped by article, for reading."""
+    title = None
+    with path.open("w", encoding="utf-8") as out:
+        for c in chunks:
+            if c.title != title:
+                title = c.title
+                out.write(f"\n{'#' * 100}\n#  {title}\n{'#' * 100}\n")
+            out.write(f"\n{'=' * 100}\n{c.chunk_id}   (section {c.section_index}, part {c.part}, "
+                      f"{count_words(c.text)} words)\n{HEADING_SEPARATOR.join(c.heading_path)}\n{c.url}\n"
+                      f"{'-' * 100}\n")
+            for paragraph in c.text.split("\n"):
+                out.write(textwrap.fill(paragraph, 100) + "\n")
 
 
 def main() -> None:
@@ -61,7 +78,8 @@ def main() -> None:
     with out_path.open("w", encoding="utf-8") as out:
         for chunk in chunks:
             out.write(json.dumps(chunk.to_dict(), ensure_ascii=False) + "\n")
-    log.info("Wrote %d chunks from %d articles to %s", len(chunks), len(articles), out_path)
+    write_pretty(chunks, args.data_dir / "chunks_pretty.txt")
+    log.info("Wrote %d chunks from %d articles to %s and chunks_pretty.txt", len(chunks), len(articles), out_path)
 
     tokens = [len(e.ids) for e in tokenizer.encode_batch([c.context_text for c in chunks])]
     log.info(describe("words per chunk", [count_words(c.text) for c in chunks]))

@@ -64,11 +64,13 @@ Rules:
 - a spot-check of 20 random chunks reads well.
 
 **Result (done):**
-- 27,114 chunks: median 188 words and 260 tokens, at most 450 tokens.
+- 27,847 chunks: median 191 words and 265 tokens, at most 450 tokens.
 - Formulas (LaTeX) take many tokens per word, so chunks over `--max-tokens` are split again at a proportionally smaller word size.
 - The spot-check found citation text from `<ref>` footnotes inside sentences, so `wikitext.py` now removes footnotes.
+- Reading the chunks also showed that dropping every template lost real text. Examples: foreign terms in `{{lang}}` (the first chunk of "A priori and a posteriori" lost both terms), quotations in `{{blockquote}}`, dashes and formula variables. `wikitext.py` now replaces content-bearing templates with their text before stripping the rest. 19% of chunks changed; leftover gaps such as "( )" dropped from 1,279 to 151.
+- `build_chunks.py` also writes `chunks_pretty.txt`, a readable view of all chunks.
 - Known leftovers:
-  - small gaps where inline templates were dropped (e.g. "death by burning and .");
+  - remaining gaps from rarer templates;
   - about 100 split pieces that start mid-sentence, in lists and other text without sentence punctuation.
 
 ## Phase 2: Embeddings and vector index
@@ -86,6 +88,18 @@ Rules:
 **Done when:**
 - the index builds in about 10–20 minutes on CPU;
 - a few hand-written queries return sensible top-10 results, including one scenario query that never names its concept.
+
+**Result (done):**
+- 27,847 × 384 embeddings (43 MB).
+- The first full run took 95 minutes, because another CPU-heavy job was running at the same time; rebuilds only embed changed chunks.
+- `scripts/search.py "query"` prints the top chunks for checking retrieval by eye.
+- Six test queries:
+  - "Who coined the term moral luck?": the Moral luck lead section ranked 1st.
+  - "Can a drunk driver who got home safely be less blameworthy than one who killed a child?" (a scenario that never names its concept): Moral luck chunks ranked 1st and 2nd.
+  - "If you replace every plank of a ship one at a time, is it still the same ship?": all of the top 5 are Ship of Theseus chunks.
+  - "What are the main objections to utilitarianism?": the criticism sections of Utilitarianism and the Demandingness objection article fill the top 5.
+  - "Is it wrong to lie to a murderer who asks where your friend is hiding?": the exact section (Categorical imperative › Lying to a murderer) ranked 3rd, below generic Lie chunks.
+  - "Why is justified true belief not sufficient for knowledge?": general JTB chunks fill the top 5, and the Gettier problem chunks rank only around 30th. This is a candidate case for a reranker or query rewriting.
 
 ## Phase 3: Answering with citations
 

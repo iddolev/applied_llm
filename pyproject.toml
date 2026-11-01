@@ -8,8 +8,11 @@ dependencies = [
     "anthropic>=2.3.0",
     "httpx>=0.27",
     "mwparserfromhell>=0.6.6",
+    "numpy>=2.5.4",
     "python-dotenv>=1.2.4",
+    "sentence-transformers>=6.2.0",
     "tokenizers>=0.23.3",
+    "torch>=2.15.0",
     "tqdm>=4.66",
 ]
 
@@ -19,3 +22,12 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/applied_llm"]
+
+# CPU-only PyTorch, so sentence-transformers doesn't pull in the multi-GB CUDA build.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
