@@ -31,23 +31,45 @@ The cleaned corpus is about 32M characters in 21,918 sections:
 
 Rules:
 - **Unit:** each section, as produced by `wikitext_to_sections`.
-- **Long sections:** split sections over about 300 words into chunks of about 300 words, with an overlap of about 50 words. Split at paragraph boundaries where possible, otherwise at sentence boundaries.
-- **Short sections:** merge sections under about 30 words into the next section of the same article; if there is no next section, into the previous one.
-- **Heading path:** keep the path for each chunk (e.g. `["Moral luck", "Criticism"]`), including parent headings for subsections. The text that gets embedded starts with `Moral luck › Criticism\n\n`, so chunks that say "Nagel rejects this…" stay on topic.
+- **Heading path:** keep the path for each chunk (e.g. `["Moral luck", "Criticism"]`), including parent headings for subsections, computed from the heading levels. The lead section's path is just the title. The text that gets embedded or shown to Claude starts with `Moral luck › Criticism\n\n`, so chunks that say "Nagel rejects this…" stay on topic. The stored `text` doesn't include this prefix.
+- **Empty sections:** 1,933 sections are parent headings with no text of their own, because their content is in their subsections. They produce no chunk; their heading survives in their subsections' heading paths.
+- **Short sections:** merge non-empty sections under about 30 words (about 775 sections, mostly a sentence introducing the subsections that follow):
+  - into the next section, if that is one of their subsections, so the intro stays with what it introduces;
+  - otherwise into the previous section, with the short section's heading kept as a line in the text;
+  - into the next section if there is no previous one.
+- **Long sections:** split sections over about 300 words into chunks of about 300 words, with an overlap of about 50 words:
+  - pieces are balanced in size, so a 320-word section doesn't leave a 20-word tail;
+  - cuts fall at paragraph boundaries where possible, otherwise at sentence boundaries, never mid-sentence;
+  - the overlap consists of whole sentences.
+- **Settings:** the 300-word target, 50-word overlap and 30-word minimum are command-line options, so other values can be tried once the evaluation exists.
 - **Chunk record:**
-  - `chunk_id`, e.g. `Moral_luck#3`
+  - `chunk_id`, e.g. `Moral_luck#3` (numbered within the article)
   - `title`
+  - `article_id`
+  - `section_index`: the section's position in the output of `wikitext_to_sections`
+  - `part`: the n-th piece of a split section
   - `heading_path`
   - `text`
-  - `url`: links to the section via its anchor, `https://en.wikipedia.org/wiki/Moral_luck#Criticism`. The anchor is the heading with spaces turned into underscores.
-  - `article_id`
-  - `section_index`
-  - `part`, the n-th piece of a split section
+  - `url`: links to the section via its anchor, `https://en.wikipedia.org/wiki/Moral_luck#Criticism`, with these anchor rules:
+    - the anchor is the heading text with spaces turned into underscores;
+    - special characters are percent-encoded;
+    - repeated headings get `_2`, `_3`, … as on Wikipedia;
+    - lead chunks link to the article itself.
+- **Edge cases to check:** duplicate headings, headings with special characters, and the longest section (19,381 words).
+- **Tokenizer:** add the embedding model's tokenizer (`tokenizers`) as a dependency in this phase, for the token-length check; Phase 2 needs it anyway.
 
 **Done when:**
-- every chunk's embedded text is at most about 450 tokens (checked with the embedding model's tokenizer);
+- every chunk's embedded text is at most about 450 tokens (checked with the embedding model's tokenizer; the model's hard limit is 512);
 - statistics for chunk count and lengths are logged;
 - a spot-check of 20 random chunks reads well.
+
+**Result (done):**
+- 27,114 chunks: median 188 words and 260 tokens, at most 450 tokens.
+- Formulas (LaTeX) take many tokens per word, so chunks over `--max-tokens` are split again at a proportionally smaller word size.
+- The spot-check found citation text from `<ref>` footnotes inside sentences, so `wikitext.py` now removes footnotes.
+- Known leftovers:
+  - small gaps where inline templates were dropped (e.g. "death by burning and .");
+  - about 100 split pieces that start mid-sentence, in lists and other text without sentence punctuation.
 
 ## Phase 2: Embeddings and vector index
 

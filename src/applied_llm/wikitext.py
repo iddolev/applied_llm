@@ -35,12 +35,13 @@ class Section:
 
 
 def _remove_non_text(code: mw.wikicode.Wikicode) -> None:
-    """Remove images, categories and tables, which strip_code would otherwise mangle into text."""
+    """Remove images, categories, tables and footnotes, which strip_code would otherwise mangle into text."""
     for node in code.filter(recursive=True, forcetype=(Wikilink, Tag)):
         if isinstance(node, Wikilink):
             if str(node.title).strip().lower().startswith(_NON_TEXT_LINK_PREFIXES):
                 _safe_replace(code, node, "")
-        elif node.wiki_markup == "{|" or str(node.tag).lower() == "table":
+        elif node.wiki_markup == "{|" or str(node.tag).lower() in ("table", "ref"):
+            # Footnotes (<ref>) would otherwise leave citation text in the middle of sentences.
             _safe_replace(code, node, "")
         elif str(node.tag).lower() == "math" and node.contents is not None:
             # strip_code drops <math> entirely; keep the LaTeX so formulas aren't lost.
