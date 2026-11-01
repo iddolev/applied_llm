@@ -1,4 +1,4 @@
-# Frameworks: conclusions and recommendations
+# Conclusions and recommendations
 
 ## Recommendation
 
@@ -93,3 +93,27 @@ Arize Phoenix is a comparable alternative.
 - **Complex agents:** the agent needs persistent state, parallel branches or human-in-the-loop steps. Consider LangGraph.
 - **Several LLM providers:** we want to compare or switch between answering models from different providers. Consider LiteLLM for the answering call only.
 - **Rewriting existing features:** we find ourselves building a feature a framework already provides well, such as a specific retrieval technique we want as a reference. Use the framework for that component or experiment only.
+
+## Retrieval: BM25 and hybrid search
+
+BM25 ("Best Matching 25", also called Okapi BM25) is the classic **keyword-based** ranking function from the 1990s. It is still the default ranking in search engines like Elasticsearch and Lucene. It knows nothing about meaning; it scores a passage by which of the *question's words* it contains. For each word in the question, three factors combine:
+
+1. **Rarity (IDF):** rare words count much more than common ones. A passage matching "akrasia" scores far higher than one matching "theory", because "akrasia" appears in few passages.
+2. **Term frequency, with saturation:** a word appearing 3 times scores higher than once, but with diminishing returns. The 20th occurrence adds almost nothing, so keyword stuffing doesn't win.
+3. **Length normalisation:** a match in a short passage counts more than the same match buried in a very long one.
+
+The passage's score is the sum over the question's words. Words are usually lowercased and stemmed first, so "arguments" matches "argument".
+
+**Strengths and weaknesses compared with embeddings:**
+
+| | BM25 | Embeddings |
+|---|---|---|
+| Exact names and jargon ("Gettier", "Ship of Theseus", "akrasia") | Strong | Can blur them into the general topic |
+| Synonyms and paraphrase ("blame for outcomes you didn't control" → Moral luck) | Fails: no shared words, no match | Strong |
+| Word order and negation | Ignores them | Mostly ignores them too |
+| Training, model, GPU | None needed; instant to build | Needs a model |
+| Explainability | Fully transparent: you can see which words matched | Opaque |
+
+Their failures are largely complementary, which is why **hybrid search** helps. Run both searches and merge the two ranked lists, usually with *reciprocal rank fusion*: each passage scores `1/(60 + rank)` in each list, and the scores are added. Passages ranked high by either method rise to the top, and passages ranked high by both rise furthest. In Python, the `bm25s` library indexes our ~30k chunks in seconds.
+
+**Recommendation:** don't include BM25 in the first baseline. Add hybrid search as a Phase 5 variant if the evaluation shows low recall on questions with rare terms or names (see [plans/rag-and-hierarchical-summaries.md](plans/rag-and-hierarchical-summaries.md)).
