@@ -111,15 +111,22 @@ Rules:
   - answer **only** from the sources;
   - put inline `[n]` markers after each claim;
   - say explicitly when the sources don't cover the question, rather than answering from general knowledge.
-- **Output:** use Claude structured output (`messages.parse` with Pydantic) to get `{answer: str, cited: list[int], sufficient: bool}`.
+- **Output:** use Claude structured output (Pydantic, via the streaming helper) to get `{answer: str, cited: list[int], coverage: full | partial | none}`. Coverage has three levels rather than a yes/no flag, because many questions are only partly covered.
 - **Post-processing:**
-  - check that every `[n]` in the answer is between 1 and k and appears in `cited`;
-  - turn markers into section links;
-  - log any mismatch.
-- **Model:** configurable; start with Claude Sonnet or Opus for answers.
-- **Logging:** write each run (question, chunk ids with scores, prompt, answer, citations, tokens, latency) to `data/runs/*.jsonl`.
+  - take the cited passages from the `[n]` markers in the answer text (the authoritative source), and flag any number outside 1..k;
+  - turn markers into section links.
+- **Model:** configurable; the default is Claude Sonnet 5.5 at effort `medium` (`--model`, `--effort`).
+- **Logging:** write each run (question, chunk ids with scores, answer, citations, coverage, tokens, latency) to `data/runs/<date>.jsonl`.
+- **Interactive mode:** `ask.py` without questions reads them one at a time, so the libraries and the embedding model load only once.
 
 **Done when** `ask.py` answers a handful of questions with correct, clickable citations and declines a question outside the corpus.
+
+**Result (done):**
+- All six test questions were answered correctly with section links, and the off-corpus question ("What is the boiling point of tungsten?") was declined.
+- Each answer took 4–9 seconds, at about $0.03 per question.
+- Claude used the right sections even where embeddings ranked them low.
+- Details and full answers are in [../../sandbox/answering-test-questions.md](../../sandbox/answering-test-questions.md).
+- The first run exposed a parsing bug: unbalanced italic markup made mwparserfromhell merge the rest of an article into one section (32 articles). `wikitext.py` now parses without style tags and removes footnotes with a regex before parsing.
 
 ## Phase 4: Question set and evaluation
 

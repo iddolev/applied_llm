@@ -23,6 +23,12 @@ BOILERPLATE_SECTIONS = {
 
 _NON_TEXT_LINK_PREFIXES = ("file:", "image:", "media:", "category:")
 
+# Footnotes, removed before parsing: a malformed one (e.g. "<ref><ref>...</ref>") can make the
+# parser swallow the rest of the article, headings included.
+_REF = re.compile(r"<ref[^>]*/>|<ref(?:\s[^>]*)?>.*?</ref\s*>", re.DOTALL | re.IGNORECASE)
+# Italic/bold quotes, left in the text because style tags aren't parsed (see wikitext_to_sections).
+_STYLE_QUOTES = re.compile(r"'{2,}")
+
 
 @dataclass
 class Section:
@@ -151,7 +157,7 @@ def _safe_replace(code: mw.wikicode.Wikicode, node, value: str) -> None:
 
 
 def _to_text(code: mw.wikicode.Wikicode) -> str:
-    text = code.strip_code(normalize=True, collapse=True)
+    text = _STYLE_QUOTES.sub("", code.strip_code(normalize=True, collapse=True))
     # Malformed tables can survive parsing; drop their leftover markup lines.
     text = re.sub(r"^\s*(\{\||\|\}|\|-).*$", "", text, flags=re.MULTILINE)
     text = re.sub(r"[ \t]+", " ", text)
@@ -162,7 +168,10 @@ def _to_text(code: mw.wikicode.Wikicode) -> str:
 
 def wikitext_to_sections(wikitext: str) -> list[Section]:
     """Split an article into its lead and sections, dropping boilerplate sections."""
-    code = mw.parse(wikitext)
+    # Unbalanced italic or bold quotes make mwparserfromhell nest every later heading inside a
+    # style tag, merging the rest of the article into one section. So style tags aren't parsed,
+    # and their quotes are removed from the text instead.
+    code = mw.parse(_REF.sub("", wikitext), skip_style_tags=True)
     sections: list[Section] = []
     skip_below_level: int | None = None
 
@@ -170,7 +179,7 @@ def wikitext_to_sections(wikitext: str) -> list[Section]:
         headings = sec.filter_headings(recursive=False)
         if headings and sec.nodes and isinstance(sec.nodes[0], Heading):
             heading_node = headings[0]
-            heading = heading_node.title.strip_code().strip()
+            heading = _STYLE_QUOTES.sub("", heading_node.title.strip_code()).strip()
             level = heading_node.level
             sec.remove(heading_node)
         else:
