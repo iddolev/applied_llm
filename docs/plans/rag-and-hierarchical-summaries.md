@@ -133,33 +133,52 @@ Rules:
 **Module:** `src/applied_llm/evaluation/`
 **Scripts:** `scripts/build_questions.py`, `scripts/run_eval.py`
 
-**Question set:** about 150–200 questions, with a mix of types, since each type tests a different weakness:
+**Question set** (`data/eval/questions.jsonl`): about 150 questions, deliberately mixed, because each type tests a different weakness:
 
-| Type | Example | Tests |
-|---|---|---|
-| Lookup | "Who coined the term *moral luck*?" | Basic retrieval |
-| Paraphrase or scenario | "Can you be blamed for a drunk drive that harmed no one only by luck?" | Vocabulary mismatch |
-| Multi-hop | Needs facts from two articles, where the second depends on the first | Single-shot retrieval |
-| Broad or comparative | "What are the main objections to utilitarianism?" | Coverage of many sections |
-| Negation or relation | Questions where word order or "not" matters | Bag-of-words weakness of embeddings |
-| Unanswerable | A plausible question the corpus doesn't cover | Grounding and abstention |
+| Type | ~Count | How it's generated | Gold (what counts as right) | Tests |
+|---|---|---|---|---|
+| Lookup | 40 | Pick a random chunk; Claude writes a question the chunk answers, in different words from the chunk | That chunk's section and a reference answer | Basic retrieval |
+| Scenario | 30 | Pick a concept article; Claude writes a concrete situation that never names the concept or its key terms (e.g. the drunk-driver question for moral luck) | The article's relevant sections | Vocabulary mismatch |
+| Multi-hop | 25 | Pick article A and an article B that A links to; the question needs one fact from each | One section from each article | Single-shot retrieval |
+| Broad or comparative | 25 | Pick an article with a Criticism or Objections section, or two related positions (e.g. rationalism vs empiricism) | A set of sections plus a list of key points the answer should contain | Coverage of many sections |
+| Negation or relation | 15 | Pick a chunk that states who rejected or influenced what; the question reverses roles or uses "not" | That chunk's section | Bag-of-words weakness of embeddings |
+| Unanswerable | 15 | Plausible questions the corpus can't answer, e.g. biographical details about philosophers (people were excluded from the corpus) | None; the right behaviour is to decline | Grounding and abstention |
 
-**How to build it:**
-- Claude generates questions from sampled sections, articles or pairs of articles, and records the gold sections and a reference answer for each.
-- Instruct it to avoid copying the section's wording; otherwise the questions are biased toward lexical overlap and flatter retrieval.
-- Review questions by hand, at least for a subset, and fix or drop bad ones.
-- Store as `data/eval/questions.jsonl`, under version control if it's small enough (decide later).
+**Avoiding bias:** questions written by looking at a chunk tend to reuse its words, which flatters retrieval. So:
+- **Generation prompt:** it requires paraphrase.
+- **Validation pass:** a second Claude call checks each question against only its gold sections: it must be answerable from them, unambiguous, and not copy their wording. Questions that fail are regenerated or dropped.
+- **Unanswerable questions:** the validation pass checks the top 50 retrieved chunks to confirm none of them answers the question.
 
-**Metrics**, per question type:
-- **Retrieval recall@k:** was a gold section among the retrieved chunks? Computed for k = 5, 10, 30, 100.
-- **Answer correctness:** an LLM judge compares the answer with the reference answer.
-- **Citation support:** for each cited chunk, an LLM judge checks whether it supports the claim it is attached to.
-- **Abstention:** the system declines unanswerable questions and doesn't decline answerable ones.
+**Models:** Claude Opus 5.5 generates and validates the questions, and also serves as the judge. That keeps question and grading quality high, and uses a different model from the Sonnet answerer, which reduces the bias of a model grading its own kind of output.
+
+**Review (decided):** I review the questions and write only the flagged ones (ambiguous, too easy, wrong gold, etc.) to a readable file, `sandbox/eval-questions-flagged.md`, with their gold sections and reference answers, for the user to decide on. After that the set stays fixed, so scores remain comparable over time. Whether `questions.jsonl` goes into git is decided once its size is known.
+
+**Metrics**, per question and averaged per type:
+- **Retrieval recall@k** (k = 5, 10, 30, 100): was a gold section among the retrieved chunks? For broad questions, it is the fraction of gold sections retrieved. It needs no LLM, so it costs nothing, and it isolates retrieval from answering.
+- **Answer correctness:** the judge compares the answer with the reference answer and gives correct, partially correct or wrong. For broad questions it reports the share of key points covered.
+- **Citation support:** for each sentence with `[n]` markers, the judge checks whether the cited chunks actually support it. This catches answers that are right but drew on Claude's own knowledge rather than the sources.
+- **Abstention:** the system declines unanswerable questions (coverage `none`) and doesn't decline answerable ones (no false refusals).
 - **Cost and latency** per question.
 
-**Output:** a per-variant results file and a summary table that compares variants by question type.
+**Checking the judge:** check about 20 of its verdicts by hand, and show the user any disagreements, before relying on it.
 
-**Done when** the baseline has a full set of scores per question type, and the failures have been examined by hand to see where they come from: retrieval, answering or the question itself.
+**Harness** (`scripts/run_eval.py`):
+- **Running a variant:** `run_eval.py --variant baseline -k 30 --model claude-sonnet-5-5` runs every question, writes per-question results to `data/eval/results/<variant>.jsonl`, and prints a summary table by question type.
+- **Comparing variants:** `run_eval.py --compare baseline k10 ...` puts variants side by side.
+- **Caching:** answers and judge verdicts are cached, so re-scoring or adding a variant doesn't pay again for the parts that didn't change.
+
+**Cost (approved):**
+
+| Item | Cost |
+|---|---|
+| Building the set: generation and validation with Opus 5.5 ($4 / $20 per million tokens) | About $10, once |
+| Each evaluation run: Sonnet answers (~$4.50) plus Opus judging (~$6) | About $10 per variant |
+| Retrieval-only metrics | Free |
+
+**Done when:**
+- the baseline has a full set of scores per question type;
+- its failures have been examined by hand to see where they come from: retrieval, answering or the question itself;
+- a short write-up says which Phase 5 improvements to try.
 
 ## Phase 5: Retrieval improvements (only where Phase 4 shows a need)
 
