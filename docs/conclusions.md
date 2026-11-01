@@ -117,3 +117,31 @@ The passage's score is the sum over the question's words. Words are usually lowe
 Their failures are largely complementary, which is why **hybrid search** helps. Run both searches and merge the two ranked lists, usually with *reciprocal rank fusion*: each passage scores `1/(60 + rank)` in each list, and the scores are added. Passages ranked high by either method rise to the top, and passages ranked high by both rise furthest. In Python, the `bm25s` library indexes our ~30k chunks in seconds.
 
 **Recommendation:** don't include BM25 in the first baseline. Add hybrid search as a Phase 5 variant if the evaluation shows low recall on questions with rare terms or names (see [plans/rag-and-hierarchical-summaries.md](plans/rag-and-hierarchical-summaries.md)).
+
+## Vector search: brute force, not a vector database
+
+**Decision:** the embeddings live in a plain numpy matrix (`data/philosophy/embeddings.npy`, 27,847 × 384 float32, rows normalized to length 1). Search is exact brute force: compute the dot product of the query vector with every row, then take the top-k with `argpartition`. That costs O(N·d) per query (N chunks, d = 384 dimensions).
+
+**Why that is fine here:**
+- **Speed:** 27,847 × 384 is about 10.7 million multiply-adds per query. numpy hands this to an optimized matrix library (BLAS) that uses all CPU cores and vector instructions, so it takes a few milliseconds; selecting the top-k is O(N), also milliseconds.
+- **Not the bottleneck:** embedding the question with the model takes longer than the search, and Claude's answer later takes seconds.
+- **Exact results:** it always returns the true top-k. That matters for the experiment: when retrieval fails, the embedding model is to blame, not an approximate index.
+
+**What a vector database would do differently** is use an approximate index:
+- **ANN (approximate nearest neighbour) search** finds vectors that are *almost certainly* among the closest, in much less than O(N) time, by giving up the guarantee of an exact top-k.
+- **HNSW (Hierarchical Navigable Small World)** links the vectors into a multi-layer graph of near neighbours and answers a query by greedily walking from a coarse top layer down to the closest nodes, roughly O(log N) per query.
+- **IVF (inverted file index)** clusters the vectors in advance (e.g. with k-means) and, at query time, searches only the few clusters whose centres are closest to the query.
+- **Product quantization (PQ)** compresses each vector by splitting it into sub-vectors and replacing each with the ID of its nearest entry in a small learned codebook, so distances can be estimated quickly from much less memory.
+
+The costs of these indexes:
+- **Recall:** they occasionally miss true neighbours. Recall is typically 95–99%, tunable.
+- **Build and memory:** building the index takes time, and an HNSW graph uses extra memory.
+- **Updates:** adding and removing items is more complicated.
+
+**When brute force stops being enough:** at around a million vectors, or many queries per second.
+- 1M × 384 floats take 1.5 GB of memory, and each query takes maybe 50–100 ms.
+- At 10M+ vectors, or under heavy query load, ANN becomes necessary.
+
+There are two drop-in replacements behind the same `ChunkIndex.search` interface:
+- **An ANN library:** FAISS or hnswlib, over the same matrix.
+- **A database with built-in ANN:** LanceDB or Chroma, which also adds metadata filtering (e.g. "only Ethics articles") and keeps data on disk instead of in memory.
